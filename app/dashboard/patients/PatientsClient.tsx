@@ -82,6 +82,18 @@ export function PatientsClient({ initialPatients, selectedDate }: Props) {
               />
             </div>
             <div className="grid gap-2">
+              <Label htmlFor="phone" className="text-base">
+                Phone
+              </Label>
+              <Input
+                id="phone"
+                name="phone"
+                type="tel"
+                placeholder="Phone number"
+                className="h-10"
+              />
+            </div>
+            <div className="grid gap-2">
               <Label htmlFor="service" className="text-base">
                 Service
               </Label>
@@ -97,21 +109,6 @@ export function PatientsClient({ initialPatients, selectedDate }: Props) {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="cost" className="text-base">
-                Cost
-              </Label>
-              <Input
-                id="cost"
-                name="cost"
-                type="number"
-                placeholder="0"
-                min={0}
-                step={0.01}
-                className="h-10"
-                required
-              />
             </div>
             <div className="grid gap-2">
               <Label htmlFor="doctor" className="text-base">
@@ -183,8 +180,9 @@ export function PatientsClient({ initialPatients, selectedDate }: Props) {
             <TableHeader>
               <TableRow>
                 <TableHead className="text-base font-semibold">Name</TableHead>
+                <TableHead className="text-base font-semibold">Phone</TableHead>
+                <TableHead className="text-base font-semibold">File #</TableHead>
                 <TableHead className="text-base font-semibold">Service</TableHead>
-                <TableHead className="text-base font-semibold">Cost</TableHead>
                 <TableHead className="text-base font-semibold">Doctor</TableHead>
                 <TableHead className="text-base font-semibold">Status</TableHead>
                 <TableHead className="text-base font-semibold">Referral</TableHead>
@@ -194,7 +192,7 @@ export function PatientsClient({ initialPatients, selectedDate }: Props) {
               {initialPatients.length === 0 ? (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={7}
                     className="py-8 text-center text-muted-foreground"
                   >
                     No patients for this date.
@@ -207,10 +205,13 @@ export function PatientsClient({ initialPatients, selectedDate }: Props) {
                     {patient.name}
                   </TableCell>
                   <TableCell className="text-base text-foreground">
-                    {patient.service}
+                    {patient.phone ?? "—"}
                   </TableCell>
                   <TableCell className="text-base text-foreground">
-                    {patient.cost}
+                    {patient.file_number ?? "—"}
+                  </TableCell>
+                  <TableCell className="text-base text-foreground">
+                    {patient.service ?? "—"}
                   </TableCell>
                   <TableCell>
                     <span className="rounded-md border border-primary/20 bg-primary/5 px-2 py-0.5 text-sm font-medium text-foreground">

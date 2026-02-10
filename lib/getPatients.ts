@@ -4,10 +4,11 @@ export type PatientRow = {
   id: string;
   created_at: string;
   name: string;
-  service: string;
-  cost: number;
-  status: "paid" | "pending";
-  referral: string;
+  phone?: string | null;
+  file_number?: string | null;
+  service?: string | null;
+  status?: "paid" | "pending" | null;
+  referral?: string | null;
   doctor?: string | null;
 };
 
@@ -33,7 +34,7 @@ export async function getPatientsByDate(
 
   const { data, error } = await supabase
     .from("patients")
-    .select("id, created_at, name, service, cost, status, referral, doctor")
+    .select("id, created_at, name, phone, file_number, service, status, referral, doctor")
     .gte("created_at", from)
     .lt("created_at", to)
     .order("created_at", { ascending: false });

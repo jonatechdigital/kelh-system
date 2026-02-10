@@ -1,5 +1,12 @@
 import { supabase } from "@/lib/supabaseClient";
 
+export type VisitServiceItem = {
+  id: string;
+  category: string;
+  name: string;
+  price: number;
+};
+
 export type VisitRow = {
   id: string;
   created_at: string;
@@ -7,9 +14,14 @@ export type VisitRow = {
   consultation_fee: number;
   consultation_status: "pending" | "paid" | "waived";
   treatment_cost: number;
+  total_paid: number;
+  total_amount: number;
+  payment_method: string | null;
   doctor: string | null;
+  referral_source: string | null;
+  services: VisitServiceItem[];
   findings: string | null;
-  status: "active" | "closed";
+  status: "triage" | "active" | "closed";
 };
 
 export type VisitWithPatient = VisitRow & {
@@ -35,9 +47,9 @@ export async function getActiveVisitsToday(): Promise<VisitWithPatient[]> {
   const { data: visits, error: visitError } = await supabase
     .from("visits")
     .select(
-      "id, created_at, patient_id, consultation_fee, consultation_status, treatment_cost, doctor, findings, status"
+      "id, created_at, patient_id, consultation_fee, consultation_status, treatment_cost, total_paid, total_amount, payment_method, doctor, referral_source, services, findings, status"
     )
-    .eq("status", "active")
+    .in("status", ["active", "triage"])
     .gte("created_at", from)
     .lt("created_at", to)
     .order("created_at", { ascending: false });
@@ -61,6 +73,8 @@ export async function getActiveVisitsToday(): Promise<VisitWithPatient[]> {
   const patientMap = new Map(patients.map((p) => [p.id, p]));
   return visits.map((v) => ({
     ...v,
+    services: Array.isArray(v.services) ? v.services : [],
+    total_amount: Number((v as { total_amount?: number }).total_amount) ?? 0,
     patient: patientMap.get(v.patient_id) ?? {
       id: v.patient_id,
       name: "—",
@@ -76,7 +90,7 @@ export async function getVisitById(
   const { data: visit, error: visitError } = await supabase
     .from("visits")
     .select(
-      "id, created_at, patient_id, consultation_fee, consultation_status, treatment_cost, doctor, findings, status"
+      "id, created_at, patient_id, consultation_fee, consultation_status, treatment_cost, total_paid, total_amount, payment_method, doctor, referral_source, services, findings, status"
     )
     .eq("id", visitId)
     .single();
@@ -95,9 +109,16 @@ export async function getVisitById(
   if (patientError || !patient) {
     return {
       ...visit,
+      services: Array.isArray(visit.services) ? visit.services : [],
+      total_amount: Number((visit as { total_amount?: number }).total_amount) ?? 0,
       patient: { id: visit.patient_id, name: "—", file_number: null },
     } as VisitWithPatient;
   }
 
-  return { ...visit, patient } as VisitWithPatient;
+  return {
+    ...visit,
+    services: Array.isArray(visit.services) ? visit.services : [],
+    total_amount: Number((visit as { total_amount?: number }).total_amount) ?? 0,
+    patient,
+  } as VisitWithPatient;
 }

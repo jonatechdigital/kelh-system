@@ -34,6 +34,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -43,6 +50,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  REFERRAL_OPTIONS,
+  DOCTOR_OPTIONS,
+  PAYMENT_METHOD_OPTIONS,
+} from "@/lib/kelhConstants";
+
 const CATEGORIES = [
   "Supplies",
   "Equipment",
@@ -86,7 +99,10 @@ export function DashboardClient({
   const [visitCardLoading, setVisitCardLoading] = useState(false);
 
   const [registerName, setRegisterName] = useState("");
+  const [registerPhone, setRegisterPhone] = useState("");
   const [registerReferral, setRegisterReferral] = useState("");
+  const [registerDoctor, setRegisterDoctor] = useState("");
+  const [registerPaymentMethod, setRegisterPaymentMethod] = useState("");
   const [registerSubmitting, setRegisterSubmitting] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
@@ -123,15 +139,18 @@ export function DashboardClient({
     try {
       const reg = await registerPatient({
         name: registerName.trim(),
-        referral: registerReferral.trim() || undefined,
+        phone: registerPhone.trim() || undefined,
+        referral: registerReferral || undefined,
+        doctor: registerDoctor,
+        paymentMethod: registerPaymentMethod,
       });
-      if (reg) {
-        const res = await startVisit(reg.id, true);
-        if (res?.id) {
-          setRegisterName("");
-          setRegisterReferral("");
-          await openVisitCard(res.id);
-        }
+      if (reg?.visitId) {
+        setRegisterName("");
+        setRegisterPhone("");
+        setRegisterReferral("");
+        setRegisterDoctor("");
+        setRegisterPaymentMethod("");
+        await openVisitCard(reg.visitId);
       }
     } finally {
       setRegisterSubmitting(false);
@@ -364,7 +383,7 @@ export function DashboardClient({
         </Card>
       </section>
 
-      {/* Registration modal */}
+      {/* Registration modal – New Patient (Production Flow) */}
       <Dialog open={registrationOpen} onOpenChange={setRegistrationOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -372,7 +391,7 @@ export function DashboardClient({
           </DialogHeader>
           <form onSubmit={handleRegister} className="grid gap-4 py-2">
             <div className="grid gap-2">
-              <Label htmlFor="reg-name">Patient name</Label>
+              <Label htmlFor="reg-name">Full Name</Label>
               <Input
                 id="reg-name"
                 value={registerName}
@@ -383,14 +402,66 @@ export function DashboardClient({
               />
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="reg-referral">Referral (optional)</Label>
+              <Label htmlFor="reg-phone">Phone</Label>
               <Input
-                id="reg-referral"
-                value={registerReferral}
-                onChange={(e) => setRegisterReferral(e.target.value)}
-                placeholder="e.g. Walk-in"
+                id="reg-phone"
+                type="tel"
+                value={registerPhone}
+                onChange={(e) => setRegisterPhone(e.target.value)}
+                placeholder="Phone number"
                 className="h-10"
               />
+            </div>
+            <div className="grid gap-2">
+              <Label>Referral</Label>
+              <Select
+                value={registerReferral}
+                onValueChange={setRegisterReferral}
+              >
+                <SelectTrigger className="h-10 w-full">
+                  <SelectValue placeholder="Select referral" />
+                </SelectTrigger>
+                <SelectContent>
+                  {REFERRAL_OPTIONS.map((r) => (
+                    <SelectItem key={r} value={r}>
+                      {r}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>Assign Doctor</Label>
+              <Select value={registerDoctor} onValueChange={setRegisterDoctor}>
+                <SelectTrigger className="h-10 w-full">
+                  <SelectValue placeholder="Select doctor" />
+                </SelectTrigger>
+                <SelectContent>
+                  {DOCTOR_OPTIONS.map((d) => (
+                    <SelectItem key={d} value={d}>
+                      {d}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label>Mode of Payment</Label>
+              <Select
+                value={registerPaymentMethod}
+                onValueChange={setRegisterPaymentMethod}
+              >
+                <SelectTrigger className="h-10 w-full">
+                  <SelectValue placeholder="Select payment" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PAYMENT_METHOD_OPTIONS.map((p) => (
+                    <SelectItem key={p} value={p}>
+                      {p}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <DialogFooter>
               <Button
@@ -403,9 +474,9 @@ export function DashboardClient({
               <Button
                 type="submit"
                 className="bg-emerald-600 hover:bg-emerald-700"
-                disabled={registerSubmitting}
+                disabled={registerSubmitting || !registerDoctor || !registerPaymentMethod}
               >
-                {registerSubmitting ? "Registering…" : "Register & Start Visit"}
+                {registerSubmitting ? "Registering…" : "Register & Open Visit"}
               </Button>
             </DialogFooter>
           </form>

@@ -6,9 +6,8 @@ import { supabase } from "@/lib/supabaseClient";
 
 export async function addPatient(formData: FormData) {
   const name = (formData.get("name") as string)?.trim() ?? "";
+  const phone = (formData.get("phone") as string)?.trim() ?? "";
   const service = (formData.get("service") as string)?.trim() ?? "";
-  const costRaw = formData.get("cost");
-  const cost = costRaw !== null && costRaw !== "" ? Number(costRaw) : 0;
   const referral = (formData.get("referral") as string)?.trim() ?? "";
   const doctor = (formData.get("doctor") as string)?.trim() ?? "";
   const statusRaw = (formData.get("status") as string)?.trim()?.toLowerCase();
@@ -18,8 +17,8 @@ export async function addPatient(formData: FormData) {
 
   const { error } = await supabase.from("patients").insert({
     name,
+    phone,
     service,
-    cost,
     status,
     referral,
     doctor,

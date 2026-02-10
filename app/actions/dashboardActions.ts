@@ -64,7 +64,7 @@ export async function getDashboardStats(
   const [visitsRes, expensesRes] = await Promise.all([
     supabase
       .from("visits")
-      .select("id, consultation_fee, consultation_status, treatment_cost")
+      .select("id, total_paid, total_amount, consultation_fee, consultation_status, treatment_cost")
       .gte("created_at", from)
       .lt("created_at", to),
     supabase
@@ -76,6 +76,8 @@ export async function getDashboardStats(
 
   const visits = (visitsRes.data ?? []) as {
     id: string;
+    total_paid?: number;
+    total_amount?: number;
     consultation_fee: number;
     consultation_status: string;
     treatment_cost: number;
@@ -83,12 +85,15 @@ export async function getDashboardStats(
   const expenses = (expensesRes.data ?? []) as { amount: number }[];
 
   const patientsSeen = visits.length;
-  const cashIn = visits
-    .filter((v) => v.consultation_status === "paid")
-    .reduce(
-      (sum, v) => sum + Number(v.consultation_fee || 0) + Number(v.treatment_cost || 0),
-      0
-    );
+  const cashIn = visits.reduce((sum, v) => {
+    const totalPaid = Number(v.total_paid);
+    if (totalPaid > 0) return sum + totalPaid;
+    const totalAmount = Number(v.total_amount);
+    if (totalAmount > 0 && v.consultation_status === "paid") return sum + totalAmount;
+    if (v.consultation_status === "paid")
+      return sum + Number(v.consultation_fee || 0) + Number(v.treatment_cost || 0);
+    return sum;
+  }, 0);
   const cashOut = expenses.reduce((sum, e) => sum + Number(e.amount || 0), 0);
   const netCash = cashIn - cashOut;
 
@@ -109,7 +114,7 @@ export async function getRecentTransactions(): Promise<RecentTransaction[]> {
   const [visitsRes, expensesRes] = await Promise.all([
     supabase
       .from("visits")
-      .select("id, created_at, consultation_fee, treatment_cost, consultation_status, patient_id")
+      .select("id, created_at, total_paid, total_amount, consultation_fee, treatment_cost, consultation_status, patient_id")
       .order("created_at", { ascending: false })
       .limit(5),
     supabase
@@ -122,6 +127,8 @@ export async function getRecentTransactions(): Promise<RecentTransaction[]> {
   const visits = (visitsRes.data ?? []) as {
     id: string;
     created_at: string;
+    total_paid?: number;
+    total_amount?: number;
     consultation_fee: number;
     treatment_cost: number;
     consultation_status: string;
@@ -149,6 +156,8 @@ export async function getRecentTransactions(): Promise<RecentTransaction[]> {
 
   const incomeItems: RecentTransaction[] = visits.map((v) => {
     const total =
+      Number(v.total_paid) ||
+      Number(v.total_amount) ||
       Number(v.consultation_fee || 0) + Number(v.treatment_cost || 0);
     return {
       id: `visit-${v.id}`,

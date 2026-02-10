@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import {
   searchPatients,
   registerPatient,
@@ -29,8 +29,25 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-
-const DOCTORS = ["Dr. Rashid", "Dr. Mogi", "Dr. Arua", "Optical Team"] as const;
+import {
+  DOCTOR_OPTIONS,
+  PAYMENT_METHOD_OPTIONS,
+  SERVICE_CATEGORIES,
+} from "@/lib/kelhConstants";
+import type { VisitServiceItem } from "@/lib/getVisits";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 type Props = { initialActiveVisits: VisitWithPatient[] };
 
@@ -132,12 +149,44 @@ export function GatekeeperClient({ initialActiveVisits }: Props) {
       const reg = await registerPatient({
         name: registerName.trim(),
         referral: registerReferral.trim() || undefined,
+        doctor: "",
+        paymentMethod: "",
       });
-      if (reg)
-        await handleStartVisit(reg.id, true, {
-          name: registerName.trim(),
-          file_number: reg.file_number,
+      if (reg?.visitId) {
+        setSearchQuery("");
+        setSearchResults(null);
+        setRegisterMode(false);
+        setRegisterName("");
+        setRegisterReferral("");
+        setActiveVisits((prev) => {
+          const next = [...prev];
+          next.unshift({
+            id: reg.visitId,
+            patient_id: reg.id,
+            created_at: new Date().toISOString(),
+            consultation_fee: 80000,
+            consultation_status: "pending",
+            treatment_cost: 0,
+            total_paid: 0,
+            total_amount: 80000,
+            payment_method: "",
+            doctor: "",
+            referral_source: "",
+            services: [
+              { id: crypto.randomUUID(), category: "Consultation", name: "Initial Consultation", price: 80000 },
+            ],
+            findings: "",
+            status: "triage",
+            patient: {
+              id: reg.id,
+              name: registerName.trim(),
+              file_number: reg.file_number,
+            },
+          } as VisitWithPatient);
+          return next;
         });
+        await openVisitCard(reg.visitId);
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -343,6 +392,11 @@ export function GatekeeperClient({ initialActiveVisits }: Props) {
   );
 }
 
+const nfVisit = new Intl.NumberFormat("en-NG", {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+});
+
 export function VisitCardForm({
   visit,
   onUpdate,
@@ -355,16 +409,30 @@ export function VisitCardForm({
   onReload: () => Promise<void>;
 }) {
   const [doctor, setDoctor] = useState(visit.doctor ?? "");
-  const [consultationStatus, setConsultationStatus] = useState<
-    "pending" | "paid" | "waived"
-  >(visit.consultation_status);
-  const [findings, setFindings] = useState(visit.findings ?? "");
-  const [treatmentCost, setTreatmentCost] = useState(
-    String(visit.treatment_cost || 0)
-  );
-  const [saving, setSaving] = useState(false);
+  const visitServices = Array.isArray((visit as VisitWithPatient & { services?: VisitServiceItem[] }).services)
+    ? (visit as VisitWithPatient & { services?: VisitServiceItem[] }).services!
+    : [];
+  const [services, setServices] = useState<VisitServiceItem[]>(visitServices);
+  useEffect(() => {
+    const next = Array.isArray((visit as VisitWithPatient & { services?: VisitServiceItem[] }).services)
+      ? (visit as VisitWithPatient & { services?: VisitServiceItem[] }).services!
+      : [];
+    setServices(next);
+  }, [visit.id, (visit as VisitWithPatient & { services?: VisitServiceItem[] }).services?.length]);
 
-  async function handleSaveSection(updates: UpdateVisitData) {
+  const [totalPaid, setTotalPaid] = useState(
+    String((visit as VisitWithPatient & { total_paid?: number }).total_paid ?? 0)
+  );
+  const [paymentMethod, setPaymentMethod] = useState(
+    (visit as VisitWithPatient & { payment_method?: string }).payment_method ?? ""
+  );
+  const [findings, setFindings] = useState(visit.findings ?? "");
+  const [saving, setSaving] = useState(false);
+  const [addServiceOpen, setAddServiceOpen] = useState(false);
+
+  const totalDue = services.reduce((sum, s) => sum + Number(s.price || 0), 0);
+
+  async function handleSave(updates: UpdateVisitData) {
     setSaving(true);
     try {
       await onUpdate(visit.id, updates);
@@ -374,15 +442,29 @@ export function VisitCardForm({
     }
   }
 
+  function applyServices(next: VisitServiceItem[]) {
+    setServices(next);
+    const total = next.reduce((s, i) => s + Number(i.price || 0), 0);
+    handleSave({ services: next, total_amount: total });
+  }
+
+  function addService(item: VisitServiceItem) {
+    applyServices([...services, { ...item, id: item.id || crypto.randomUUID() }]);
+    setAddServiceOpen(false);
+  }
+
+  function removeService(id: string) {
+    applyServices(services.filter((s) => s.id !== id));
+  }
+
   async function handleCloseVisitClick() {
     setSaving(true);
     try {
       await onUpdate(visit.id, {
         doctor: doctor || undefined,
-        consultation_status: consultationStatus,
-        treatment_cost: Number(treatmentCost) || 0,
-        findings: findings || undefined,
-        status: "closed",
+        services,
+        total_amount: totalDue,
+        payment_method: paymentMethod || undefined,
       });
       onCloseVisit(visit.id);
     } finally {
@@ -390,35 +472,139 @@ export function VisitCardForm({
     }
   }
 
-  const consultationFee = Number(visit.consultation_fee) || 0;
-  const consultationDisplay = new Intl.NumberFormat("en-NG", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  }).format(consultationFee);
-
   return (
     <div className="grid gap-6 py-2">
-      {/* Section A: Reception – Assign Doctor */}
+      {/* Section A: Info */}
       <section className="space-y-2">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Reception
+          Info
         </h3>
+        <div className="rounded-lg border bg-muted/30 p-4 space-y-1">
+          <p className="font-medium text-foreground">
+            {visit.patient?.name ?? "—"}
+          </p>
+          <p className="text-sm text-muted-foreground">
+            File # {visit.patient?.file_number ?? "—"}
+          </p>
+          <div className="grid gap-2 pt-2">
+            <Label>Assigned Doctor</Label>
+            <Select
+              value={doctor}
+              onValueChange={(v) => {
+                setDoctor(v);
+                handleSave({ doctor: v });
+              }}
+            >
+              <SelectTrigger className="h-10 w-full">
+                <SelectValue placeholder="Assign doctor" />
+              </SelectTrigger>
+              <SelectContent>
+                {DOCTOR_OPTIONS.map((d) => (
+                  <SelectItem key={d} value={d}>
+                    {d}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </section>
+
+      {/* Section B: Service List */}
+      <section className="space-y-2">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Service List
+        </h3>
+        <div className="rounded-lg border overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="font-semibold">Name</TableHead>
+                <TableHead className="font-semibold text-right">Price</TableHead>
+                <TableHead className="w-[80px]" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {services.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={3} className="text-center text-muted-foreground py-6">
+                    No services. Add one below.
+                  </TableCell>
+                </TableRow>
+              ) : (
+                services.map((s) => (
+                  <TableRow key={s.id}>
+                    <TableCell className="font-medium">{s.name}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {nfVisit.format(Number(s.price) || 0)}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="text-destructive hover:text-destructive"
+                        disabled={saving}
+                        onClick={() => removeService(s.id)}
+                      >
+                        Remove
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))
+              )}
+            </TableBody>
+          </Table>
+          <div className="flex items-center justify-between border-t bg-muted/30 px-4 py-3">
+            <span className="font-semibold text-foreground">Total Due</span>
+            <span className="text-lg font-bold tabular-nums">{nfVisit.format(totalDue)}</span>
+          </div>
+          <div className="p-2 border-t">
+            <Popover open={addServiceOpen} onOpenChange={setAddServiceOpen}>
+              <PopoverTrigger asChild>
+                <Button type="button" variant="outline" size="sm" className="w-full">
+                  + Add Service
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-80" align="start">
+                <AddServiceForm
+                  onAdd={addService}
+                  onCancel={() => setAddServiceOpen(false)}
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+        </div>
+
+        <div className="grid gap-2 pt-2">
+          <Label htmlFor="total-paid">Total Paid</Label>
+          <Input
+            id="total-paid"
+            type="number"
+            min={0}
+            step={0.01}
+            value={totalPaid}
+            onChange={(e) => setTotalPaid(e.target.value)}
+            onBlur={() => {}}
+            className="h-10"
+          />
+        </div>
         <div className="grid gap-2">
-          <Label>Doctor</Label>
+          <Label>Payment Method</Label>
           <Select
-            value={doctor}
+            value={paymentMethod}
             onValueChange={(v) => {
-              setDoctor(v);
-              handleSaveSection({ doctor: v });
+              setPaymentMethod(v);
+              handleSave({ payment_method: v });
             }}
           >
             <SelectTrigger className="h-10 w-full">
-              <SelectValue placeholder="Assign doctor" />
+              <SelectValue placeholder="Select payment method" />
             </SelectTrigger>
             <SelectContent>
-              {DOCTORS.map((d) => (
-                <SelectItem key={d} value={d}>
-                  {d}
+              {PAYMENT_METHOD_OPTIONS.map((p) => (
+                <SelectItem key={p} value={p}>
+                  {p}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -426,98 +612,127 @@ export function VisitCardForm({
         </div>
       </section>
 
-      {/* Section B: Financial – Consultation Fee + Paid/Waived */}
+      {/* Section C: Findings */}
       <section className="space-y-2">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Financial
+          Findings / Recommendations
         </h3>
-        <div className="rounded-lg border bg-muted/30 p-4">
-          <p className="text-sm text-muted-foreground">Consultation fee</p>
-          <p className="text-xl font-bold text-foreground">
-            {consultationDisplay}
-          </p>
-          <div className="mt-2 flex gap-2">
-            {(["pending", "paid", "waived"] as const).map((s) => (
-              <Button
-                key={s}
-                type="button"
-                variant={consultationStatus === s ? "default" : "outline"}
-                size="sm"
-                className={
-                  s === "paid"
-                    ? "bg-emerald-600 hover:bg-emerald-700"
-                    : s === "waived"
-                      ? "bg-muted"
-                      : ""
-                }
-                disabled={saving}
-                onClick={() => {
-                  setConsultationStatus(s);
-                  handleSaveSection({ consultation_status: s });
-                }}
-              >
-                {s.charAt(0).toUpperCase() + s.slice(1)}
-              </Button>
-            ))}
-          </div>
-        </div>
+        <Textarea
+          value={findings}
+          onChange={(e) => setFindings(e.target.value)}
+          onBlur={() => {}}
+          placeholder="Clinical notes..."
+          className="min-h-20"
+        />
       </section>
 
-      {/* Section C: Doctor – Findings */}
-      <section className="space-y-2">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Doctor
-        </h3>
-        <div className="grid gap-2">
-          <Label htmlFor="findings">Findings / Recommendations</Label>
-          <Textarea
-            id="findings"
-            value={findings}
-            onChange={(e) => setFindings(e.target.value)}
-            onBlur={() =>
-              findings !== (visit.findings ?? "") &&
-              handleSaveSection({ findings })
-            }
-            placeholder="Clinical notes..."
-            className="min-h-24"
-          />
-        </div>
-      </section>
-
-      {/* Section D: Checkout – Treatment Cost + Close Visit */}
-      <section className="space-y-2">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Checkout
-        </h3>
-        <div className="grid gap-2">
-          <Label htmlFor="treatment-cost">Treatment cost</Label>
-          <Input
-            id="treatment-cost"
-            type="number"
-            min={0}
-            step={0.01}
-            value={treatmentCost}
-            onChange={(e) => setTreatmentCost(e.target.value)}
-            onBlur={() =>
-              handleSaveSection({
-                treatment_cost: Number(treatmentCost) || 0,
-              })
-            }
-            className="h-10"
-          />
-        </div>
+      {/* Section D: Actions */}
+      <section className="flex gap-3">
+        <Button
+          variant="outline"
+          size="lg"
+          className="flex-1"
+          disabled={saving}
+          onClick={() =>
+            handleSave({
+              doctor: doctor || undefined,
+              services,
+              total_amount: totalDue,
+              payment_method: paymentMethod || undefined,
+            })
+          }
+        >
+          {saving ? "Saving…" : "Save"}
+        </Button>
         <Button
           size="lg"
-          className="mt-4 w-full bg-emerald-600 text-lg font-semibold hover:bg-emerald-700"
+          className="flex-1 bg-emerald-600 text-lg font-semibold hover:bg-emerald-700"
           disabled={saving}
           onClick={handleCloseVisitClick}
         >
           {saving ? "Closing…" : "Close Visit"}
         </Button>
-        <p className="text-center text-xs text-muted-foreground">
-          Marks visit as closed and paid.
-        </p>
       </section>
     </div>
+  );
+}
+
+function AddServiceForm({
+  onAdd,
+  onCancel,
+}: {
+  onAdd: (item: VisitServiceItem) => void;
+  onCancel: () => void;
+}) {
+  const [category, setCategory] = useState("");
+  const [description, setDescription] = useState("");
+  const [price, setPrice] = useState("");
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const p = Number(price) || 0;
+    if (!description.trim()) return;
+    onAdd({
+      id: crypto.randomUUID(),
+      category: category || "Other",
+      name: description.trim(),
+      price: p,
+    });
+    setCategory("");
+    setDescription("");
+    setPrice("");
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="grid gap-3">
+      <div className="grid gap-1.5">
+        <Label>Category</Label>
+        <Select value={category} onValueChange={setCategory}>
+          <SelectTrigger className="h-9 w-full">
+            <SelectValue placeholder="Select category" />
+          </SelectTrigger>
+          <SelectContent>
+            {SERVICE_CATEGORIES.map((c) => (
+              <SelectItem key={c} value={c}>
+                {c}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="add-desc">Description</Label>
+        <Input
+          id="add-desc"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="e.g. Cipro Drops"
+          className="h-9"
+          required
+        />
+      </div>
+      <div className="grid gap-1.5">
+        <Label htmlFor="add-price">Price</Label>
+        <Input
+          id="add-price"
+          type="number"
+          min={0}
+          step={0.01}
+          value={price}
+          onChange={(e) => setPrice(e.target.value)}
+          placeholder="0"
+          className="h-9"
+          required
+        />
+      </div>
+      <div className="flex gap-2 pt-1">
+        <Button type="button" variant="outline" size="sm" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" size="sm">
+          Add
+        </Button>
+      </div>
+    </form>
   );
 }
