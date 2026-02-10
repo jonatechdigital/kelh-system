@@ -8,7 +8,8 @@ create table if not exists public.patients (
   service text not null,
   cost numeric not null,
   status text not null check (status in ('paid', 'pending')),
-  referral text not null
+  referral text not null,
+  doctor text not null default ''
 );
 
 -- Optional: enable RLS and add policies as needed later
